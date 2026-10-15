@@ -1,0 +1,381 @@
+import csv
+import os
+from datetime import date, timedelta
+
+BOOKS_FILE = "books.csv"
+MEMBERS_FILE = "members.csv"
+TRANSACTIONS_FILE = "transactions.csv"
+
+FINE_PER_DAY = 5
+LOAN_DAYS = 14
+
+
+def initialize_files():
+    files = {
+        BOOKS_FILE: ["Book_ID", "Title", "Author", "Quantity"],
+        MEMBERS_FILE: ["Member_ID", "Name", "Phone"],
+        TRANSACTIONS_FILE: [
+            "Transaction_ID", "Book_ID", "Member_ID",
+            "Issue_Date", "Due_Date", "Return_Date",
+            "Fine", "Status"
+        ]
+    }
+
+    for filename, headers in files.items():
+        if not os.path.exists(filename):
+            with open(filename, "w", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow(headers)
+
+
+def read_data(filename):
+    with open(filename, "r", newline="") as file:
+        return list(csv.DictReader(file))
+
+
+def write_data(filename, headers, records):
+    with open(filename, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(records)
+
+
+def next_id(filename, field):
+    records = read_data(filename)
+    numbers = [
+        int(record[field]) for record in records
+        if record[field].isdigit()
+    ]
+    return str(max(numbers, default=0) + 1)
+
+
+def add_book():
+    book_id = next_id(BOOKS_FILE, "Book_ID")
+    title = input("Enter book title: ").strip()
+    author = input("Enter author name: ").strip()
+
+    try:
+        quantity = int(input("Enter quantity: "))
+        if not title or not author or quantity <= 0:
+            raise ValueError
+    except ValueError:
+        print("Invalid title, author, or quantity.")
+        return
+
+    books = read_data(BOOKS_FILE)
+    books.append({
+        "Book_ID": book_id,
+        "Title": title,
+        "Author": author,
+        "Quantity": str(quantity),
+    })
+    write_data(BOOKS_FILE, ["Book_ID", "Title", "Author", "Quantity"], books)
+
+    print("Book added successfully. Book ID:", book_id)
+
+
+def search_books():
+    books = read_data(BOOKS_FILE)
+    query = input("Enter Book ID, title, or author: ").strip().lower()
+
+    found = [
+        book for book in books
+        if query in book["Book_ID"].lower()
+        or query in book["Title"].lower()
+        or query in book["Author"].lower()
+    ]
+
+    if found:
+        for book in found:
+            print(book)
+    else:
+        print("No matching books found.")
+
+
+def update_book():
+    books = read_data(BOOKS_FILE)
+    book_id = input("Enter Book ID to update: ").strip()
+
+    for book in books:
+        if book["Book_ID"] == book_id:
+            print("Leave a field blank to keep its current value.")
+            title = input("New title: ").strip()
+            author = input("New author: ").strip()
+            quantity = input("New quantity: ").strip()
+
+            if title:
+                book["Title"] = title
+            if author:
+                book["Author"] = author
+            if quantity:
+                try:
+                    new_quantity = int(quantity)
+                    active = sum(
+                        1 for t in read_data(TRANSACTIONS_FILE)
+                        if t["Book_ID"] == book_id
+                        and t["Status"] == "Issued"
+                    )
+                    if new_quantity < active or new_quantity < 0:
+                        print("Quantity cannot be below active issues.")
+                        return
+                    book["Quantity"] = str(new_quantity)
+                except ValueError:
+                    print("Invalid quantity.")
+                    return
+
+            write_data(
+                BOOKS_FILE,
+                ["Book_ID", "Title", "Author", "Quantity"],
+                books
+            )
+            print("Book updated successfully.")
+            return
+
+    print("Book not found.")
+
+
+def remove_book():
+    books = read_data(BOOKS_FILE)
+    book_id = input("Enter Book ID to remove: ").strip()
+
+    if any(
+        t["Book_ID"] == book_id and t["Status"] == "Issued"
+        for t in read_data(TRANSACTIONS_FILE)
+    ):
+        print("Cannot remove a book that is currently issued.")
+        return
+
+    updated = [b for b in books if b["Book_ID"] != book_id]
+
+    if len(updated) == len(books):
+        print("Book not found.")
+        return
+
+    write_data(
+        BOOKS_FILE,
+        ["Book_ID", "Title", "Author", "Quantity"],
+        updated
+    )
+    print("Book removed successfully.")
+
+
+def register_member():
+    name = input("Enter member name: ").strip()
+    phone = input("Enter phone number: ").strip()
+
+    if not name or not phone:
+        print("Name and phone are required.")
+        return
+
+    member_id = next_id(MEMBERS_FILE, "Member_ID")
+
+    members = read_data(MEMBERS_FILE)
+    members.append({
+        "Member_ID": member_id,
+        "Name": name,
+        "Phone": phone,
+    })
+    write_data(MEMBERS_FILE, ["Member_ID", "Name", "Phone"], members)
+
+    print("Member registered. Member ID:", member_id)
+
+
+def search_member():
+    members = read_data(MEMBERS_FILE)
+    query = input("Enter Member ID or name: ").strip().lower()
+
+    found = [
+        m for m in members
+        if query in m["Member_ID"].lower()
+        or query in m["Name"].lower()
+    ]
+
+    if found:
+        for member in found:
+            print(member)
+    else:
+        print("Member not found.")
+
+
+def issue_book():
+    books = read_data(BOOKS_FILE)
+    members = read_data(MEMBERS_FILE)
+
+    book_id = input("Enter Book ID: ").strip()
+    member_id = input("Enter Member ID: ").strip()
+
+    book = next((b for b in books if b["Book_ID"] == book_id), None)
+    member = next(
+        (m for m in members if m["Member_ID"] == member_id), None
+    )
+
+    if not book:
+        print("Book not found.")
+        return
+
+    if not member:
+        print("Member not found.")
+        return
+
+    transactions = read_data(TRANSACTIONS_FILE)
+
+    if any(
+        t["Book_ID"] == book_id
+        and t["Member_ID"] == member_id
+        and t["Status"] == "Issued"
+        for t in transactions
+    ):
+        print("This member already has this book issued.")
+        return
+
+    if int(book["Quantity"]) <= 0:
+        print("Book is currently unavailable.")
+        return
+
+    issue_date = date.today()
+    due_date = issue_date + timedelta(days=LOAN_DAYS)
+    transaction_id = next_id(TRANSACTIONS_FILE, "Transaction_ID")
+
+    transactions.append({
+        "Transaction_ID": transaction_id,
+        "Book_ID": book_id,
+        "Member_ID": member_id,
+        "Issue_Date": issue_date.isoformat(),
+        "Due_Date": due_date.isoformat(),
+        "Return_Date": "",
+        "Fine": "0",
+        "Status": "Issued"
+    })
+
+    write_data(
+        TRANSACTIONS_FILE,
+        [
+            "Transaction_ID", "Book_ID", "Member_ID",
+            "Issue_Date", "Due_Date", "Return_Date",
+            "Fine", "Status"
+        ],
+        transactions
+    )
+
+    book["Quantity"] = str(int(book["Quantity"]) - 1)
+    write_data(
+        BOOKS_FILE,
+        ["Book_ID", "Title", "Author", "Quantity"],
+        books
+    )
+
+    print("Book issued successfully.")
+    print("Due date:", due_date)
+
+
+def return_book():
+    transactions = read_data(TRANSACTIONS_FILE)
+    books = read_data(BOOKS_FILE)
+    book_id = input("Enter Book ID: ").strip()
+    member_id = input("Enter Member ID: ").strip()
+
+    transaction = next(
+        (
+            t for t in transactions
+            if t["Book_ID"] == book_id
+            and t["Member_ID"] == member_id
+            and t["Status"] == "Issued"
+        ),
+        None
+    )
+
+    if not transaction:
+        print("No active issue record found.")
+        return
+
+    today = date.today()
+    due_date = date.fromisoformat(transaction["Due_Date"])
+    overdue_days = max(0, (today - due_date).days)
+    fine = overdue_days * FINE_PER_DAY
+
+    transaction["Return_Date"] = today.isoformat()
+    transaction["Fine"] = str(fine)
+    transaction["Status"] = "Returned"
+
+    write_data(
+        TRANSACTIONS_FILE,
+        [
+            "Transaction_ID", "Book_ID", "Member_ID",
+            "Issue_Date", "Due_Date", "Return_Date",
+            "Fine", "Status"
+        ],
+        transactions
+    )
+
+    for book in books:
+        if book["Book_ID"] == book_id:
+            book["Quantity"] = str(int(book["Quantity"]) + 1)
+            break
+
+    write_data(
+        BOOKS_FILE,
+        ["Book_ID", "Title", "Author", "Quantity"],
+        books
+    )
+
+    print("Book returned successfully.")
+    print("Overdue days:", overdue_days)
+    print("Fine amount: Rs.", fine)
+
+
+def view_transactions():
+    transactions = read_data(TRANSACTIONS_FILE)
+
+    if not transactions:
+        print("No transaction records found.")
+        return
+
+    for transaction in transactions:
+        print(transaction)
+
+
+def main():
+    initialize_files()
+
+    while True:
+        print("\n===== LIBRARY MANAGEMENT SYSTEM =====")
+        print("1. Add Book")
+        print("2. Search Book")
+        print("3. Update Book")
+        print("4. Remove Book")
+        print("5. Register Member")
+        print("6. Search Member")
+        print("7. Issue Book")
+        print("8. Return Book")
+        print("9. View Transaction History")
+        print("10. Exit")
+
+        choice = input("Enter your choice: ").strip()
+
+        if choice == "1":
+            add_book()
+        elif choice == "2":
+            search_books()
+        elif choice == "3":
+            update_book()
+        elif choice == "4":
+            remove_book()
+        elif choice == "5":
+            register_member()
+        elif choice == "6":
+            search_member()
+        elif choice == "7":
+            issue_book()
+        elif choice == "8":
+            return_book()
+        elif choice == "9":
+            view_transactions()
+        elif choice == "10":
+            print("Thank you for using Library Management System!")
+            break
+        else:
+            print("Invalid choice. Please try again.")
+
+
+if __name__ == "__main__":
+    main()
